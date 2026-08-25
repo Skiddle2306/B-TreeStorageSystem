@@ -13,9 +13,9 @@ class tree{
         vector<node*> children;
         node* next;
     };
-    node* newNode();
     tree();
     void insert(int x);
+    void printTree();
     private:
     node* root;
 };
