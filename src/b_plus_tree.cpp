@@ -1,4 +1,5 @@
 #include "b_plus_tree.h"
+#include <cstddef>
 #include <cstdlib>
 #include <iostream>
 #include<vector>
@@ -181,4 +182,70 @@ void tree::insert(int x){
             }
         }
     }
+}
+
+bool tree::search(int val){
+    tree::node* traverse=root;
+    if(traverse==nullptr){
+        cout << "Val : "<< val <<" not found. " << endl;
+        return false;
+    }
+    if(traverse->keys.empty()){
+        cout << "Val : "<< val <<" not found. " << endl;
+        return false;
+    }
+    while(traverse->isLeaf!=true){
+        int i;
+        for(i=0;i<traverse->keys.size() && val >= traverse->keys[i];i++){}
+        traverse=traverse->children[i];
+    }
+    for(int i : traverse->keys){
+        if(i==val){
+            cout << "Val : "<< val << " found." << endl;
+            return true;
+        }
+    }
+    cout << "Val : "<< val <<" not found. " << endl;
+    return false;
+}
+void tree::search(int lower,int upper){
+    tree::node* traverse=root;
+    if(traverse==nullptr){
+        cout << "Val : "<< lower <<" not found. " << endl;
+        return;
+    }
+    if(traverse->keys.empty()){
+        cout << "Val : "<< lower <<" not found. " << endl;
+        return;
+    }
+    while(traverse->isLeaf!=true){
+        int i;
+        for(i=0;i<traverse->keys.size() && lower >= traverse->keys[i];i++){}
+        traverse=traverse->children[i];
+    }
+    cout << "Values are : ";
+    while(traverse!=nullptr){
+        int i;
+        for(i=0;traverse->keys[i]<lower;i++){}
+        if(i==traverse->keys.size()){
+            traverse=traverse->next;
+        }else{
+            for(;i<traverse->keys.size() && traverse->keys[i] <=upper;i++){
+                cout << traverse->keys[i] << " ";
+            }
+            traverse=traverse->next;
+            break;
+        }
+    }
+    while(traverse!=nullptr){
+        int i;
+        for(i=0;i<traverse->keys.size() && traverse->keys[i] <=upper;i++){
+            cout << traverse->keys[i] << " ";
+        }if(i!=traverse->keys.size()){
+            cout << endl;
+            return;
+        }
+        traverse=traverse->next;
+    }
+    cout << endl;
 }

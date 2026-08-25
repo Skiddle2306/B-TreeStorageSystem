@@ -16,6 +16,8 @@ class tree{
     tree();
     void insert(int x);
     void printTree();
+    bool search(int x);
+    void search(int x,int y);
     private:
     node* root;
 };
