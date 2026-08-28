@@ -15,7 +15,6 @@ int main(){
     t->insert(70);
     t->insert(80);
     t->insert(90);
-    t->printTree();
     t->insert(100);
     t->insert(110);
     t->insert(120);
@@ -27,10 +26,11 @@ int main(){
     t->search(130);
     t->search(30);
     t->search(190);
-    t->printTree();
-
     t->search(30,50);
     t->search(55,120);
-
+    t->search(5,15);
+    t->deleteNode(10);
+    t->deleteNode(30);
+    t->printTree();
     cout << "YAY";
 }

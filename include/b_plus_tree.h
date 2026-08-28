@@ -18,6 +18,7 @@ class tree{
     void printTree();
     bool search(int x);
     void search(int x,int y);
+    void deleteNode(int x);
     private:
     node* root;
 };

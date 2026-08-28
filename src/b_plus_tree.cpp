@@ -249,3 +249,49 @@ void tree::search(int lower,int upper){
     }
     cout << endl;
 }
+void tree::deleteNode(int x){
+    if(root->keys.empty()){
+        return;
+    }
+    stack<tree::node*> ancestors;
+    tree::node* traverse= root;
+    while(!traverse->isLeaf){
+        int i;
+        for(i=0;i<traverse->keys.size() && x>=traverse->keys[i];i++){}
+        traverse=traverse->children[i];
+    }int i;
+    for(i=0;i<traverse->keys.size() && traverse->keys[i]!= x;i++){}
+    if(i==traverse->keys.size()){
+        cout << "Element not present." << endl;;
+        return;
+    }
+    traverse->keys.erase(traverse->keys.begin()+i);
+    //More than enough elements are present
+    if(traverse->keys.size()>=order/2 - 1){
+        cout << "Successfully deleted Element" << endl;
+        return;
+    }else{
+        if(!ancestors.empty()){
+            while(!ancestors.empty()){
+                tree::node* parent=ancestors.top();
+                for(i=0;parent->children[i]!=traverse;i++){}
+                //Not the leftmost Child and left sibling has extra elements
+                if(i-1>0 && parent->children[i-1]->keys.size()>order/2-1){
+                    x=parent->children[i-1]->keys[parent->children[i-1]->keys.size()-1];
+                    parent->children[i-1]->keys.pop_back();
+                    traverse->keys.insert(traverse->keys.begin(),0);
+                    //Verify This line later
+                    parent->keys[i]=x;
+                    return;
+                }
+                //Not the rightmost child and right sibling has extra elements
+                //Has parent and borrows element
+                //no parent in which case its the root element where root gets deleted and new root is chosen aka the left child after taking element from the right child
+                
+            }
+        }else{
+            //This is when the root node is the leaf node in which case no need to do anything
+            return;
+        }
+    }
+}
