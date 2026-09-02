@@ -1,4 +1,5 @@
 #include "b_plus_tree.h"
+#include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <iostream>
@@ -18,6 +19,7 @@ tree::node* newNode(){
     a->children.reserve(order);
     a->isLeaf=false;
     a->next=nullptr;
+    a->previous=nullptr;
     return a;
 }
 
@@ -25,7 +27,7 @@ tree::tree(){
     root=new node;
     root->isLeaf=true;
     root->next=nullptr;
-    
+    root->previous=nullptr;
 }
 void tree::printTree() {
     cout << "Printing Tree : " << endl;
@@ -55,6 +57,7 @@ intervalSplitReturn splitInterval(tree::node* intervalNode){
     int n=intervalNode->keys.size()/2;
     tree::node* left=newNode();
     tree::node* right=newNode();
+    
     int i=0;
     while (i<n) {
         left->keys.push_back(intervalNode->keys[i]);
@@ -73,30 +76,21 @@ intervalSplitReturn splitInterval(tree::node* intervalNode){
     return  {val,left,right};
 }
 
-tree::node* findPredecessorLeaf(stack<tree::node*> ancestors, tree::node* child){
-    while(!ancestors.empty()){
-        tree::node* parent = ancestors.top();
-        ancestors.pop();
-        int idx;
-        for(idx=0; parent->children[idx]!=child; idx++){}
-        if(idx>0){
-            tree::node* n = parent->children[idx-1];
-            while(!n->isLeaf) n = n->children.back();
-            return n;
-        }
-        child = parent; // was leftmost child, keep climbing
-    }
-    return nullptr; // child is the leftmost leaf in the whole tree
-}
+
 
 vector<tree::node*> splitLeaf(tree::node* &leafNode){
     int n =leafNode->keys.size()/2;
     tree::node* left=newNode();
     tree::node* right=newNode();
     left->isLeaf=true;
+    left->previous=leafNode->previous;
     right->isLeaf=true;
     left->next=right;
+    right->previous=left;
     right->next=leafNode->next;
+    if (leafNode->next != nullptr) {
+        leafNode->next->previous = right;  
+    }
     int i=0;
     while(i<n){
         left->keys.push_back(leafNode->keys[i]);
@@ -137,10 +131,10 @@ void tree::insert(int x){
         //Split if overflow occurs (no parent node will be here)
         if(current->keys.size()==order){   
             vector<tree::node*> children = splitLeaf(current);
-            tree::node* predecessor = findPredecessorLeaf(visited, current);
-            if(predecessor != nullptr){
-                predecessor->next = children[0];
+            if(current->previous!=nullptr){
+                 current->previous->next = children[0];
             }
+            children[0]->previous = current->previous;
             //left most element of right split(to insert in the above node)
             int a=children[1]->keys[0];
             if(visited.empty()){
@@ -148,6 +142,8 @@ void tree::insert(int x){
                 current->keys.push_back(a);
                 current->children=children;
                 current->isLeaf=false;
+                current->previous=nullptr;
+                current->next=nullptr;
             }else{
                 while(true){
                     if(!visited.empty()){
@@ -258,6 +254,7 @@ void tree::deleteNode(int x){
     while(!traverse->isLeaf){
         int i;
         for(i=0;i<traverse->keys.size() && x>=traverse->keys[i];i++){}
+        ancestors.push(traverse);
         traverse=traverse->children[i];
     }int i;
     for(i=0;i<traverse->keys.size() && traverse->keys[i]!= x;i++){}
@@ -266,29 +263,85 @@ void tree::deleteNode(int x){
         return;
     }
     traverse->keys.erase(traverse->keys.begin()+i);
-    //More than enough elements are present
-    if(traverse->keys.size()>=order/2 - 1){
+    int minKeys=ceil((order-1)/2.0 );
+    //More than enough elements are present to delete without borrowing
+    if(traverse->keys.size()>=minKeys){
         cout << "Successfully deleted Element" << endl;
         return;
     }else{
         if(!ancestors.empty()){
-            while(!ancestors.empty()){
                 tree::node* parent=ancestors.top();
                 for(i=0;parent->children[i]!=traverse;i++){}
                 //Not the leftmost Child and left sibling has extra elements
-                if(i-1>0 && parent->children[i-1]->keys.size()>order/2-1){
+                if(i>0 && parent->children[i-1]->keys.size()>minKeys){
                     x=parent->children[i-1]->keys[parent->children[i-1]->keys.size()-1];
                     parent->children[i-1]->keys.pop_back();
-                    traverse->keys.insert(traverse->keys.begin(),0);
+                    traverse->keys.insert(traverse->keys.begin(),x);
                     //Verify This line later
-                    parent->keys[i]=x;
+                    parent->keys[i-1] = traverse->keys[0];
                     return;
                 }
                 //Not the rightmost child and right sibling has extra elements
-                //Has parent and borrows element
+                else if(i<parent->children.size()-1 && parent->children[i+1]->keys.size()>minKeys){
+                    x=parent->children[i+1]->keys[0];
+                    parent->children[i+1]->keys.erase(parent->children[i+1]->keys.begin());
+                    traverse->keys.push_back(x);
+                    //Verify This line later
+                    parent->keys[i]=parent->children[i+1]->keys[0];
+                    return;
+                }
+                //Has parent and merge nodes(make sure to change linked list pointers if needed)
+                //merge with left child
+                if(i!=0){
+                    if(traverse->previous!=nullptr){
+                        node* leftSibling=traverse->previous;
+                        for(auto i : traverse->keys){
+                            leftSibling->keys.push_back(i);
+                        }
+                        for(auto i : traverse->children){
+                            leftSibling->children.push_back(i);
+                        }
+                        leftSibling->next=traverse->next;
+                        if(traverse->next!=nullptr){
+                            traverse->next->previous=leftSibling;
+                        }
+                        
+                        for(i=0;i<parent->children.size()&& parent->children[i]!=traverse;i++){}
+                        parent->children.erase(parent->children.begin()+i);
+                        delete traverse;
+                        traverse=leftSibling;
+                        parent->keys[i-1]=leftSibling->keys[0];
+                    }
+                }else if(i!=parent->children.size()-1) {//Merge with right sibling
+                        
+                }else{
+                    node* sibling;
+                    if(i==0){
+                        sibling=traverse->next;
+                        for(auto i : traverse->keys){
+                            sibling->keys.push_back(i);
+                        }
+                        for(auto i : traverse->children){
+                            sibling->children.push_back(i);
+                        }
+                        root=sibling;
+                        delete traverse;
+                        return;
+                    }else{
+                        sibling=traverse->previous;
+                        for(auto i : sibling->keys){
+                            traverse->keys.push_back(i);
+                        }
+                        for(auto i : sibling->children){
+                            traverse->children.push_back(i);
+                        }
+                        root=traverse;
+                        delete sibling;
+                        return;
+                    }
+                    
+                }
                 //no parent in which case its the root element where root gets deleted and new root is chosen aka the left child after taking element from the right child
-                
-            }
         }else{
             //This is when the root node is the leaf node in which case no need to do anything
             return;

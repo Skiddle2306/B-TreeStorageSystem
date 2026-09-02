@@ -12,6 +12,7 @@ class tree{
         vector<int> keys;
         vector<node*> children;
         node* next;
+        node* previous;
     };
     tree();
     void insert(int x);
