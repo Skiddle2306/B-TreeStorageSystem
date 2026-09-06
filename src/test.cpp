@@ -2,7 +2,7 @@
 #include <iostream>
 
 int main(){
-    tree* t=new tree();
+    BPlusTree<int>* t=new BPlusTree<int>();
     t->insert(10);
     t->insert(20);
     t->insert(30);

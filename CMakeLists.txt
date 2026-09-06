@@ -9,6 +9,7 @@ add_executable(BTreeStorageSystem
     
     src/test.cpp
     src/b_plus_tree.cpp
+    src/page_manager.cpp
 )
 
 target_include_directories(BTreeStorageSystem PRIVATE
