@@ -1,4 +1,4 @@
-# CMake
+# Build outputs
 build/
 cmake-build-*/
 CMakeCache.txt
@@ -7,5 +7,14 @@ cmake_install.cmake
 Makefile
 compile_commands.json
 
-# VS Code
+# Cache & Editor artifacts
+.cache/
+.clangd/
 .vscode/
+.idea/
+
+# Database files & generated data
+*.db
+*.dat
+data/*
+!data/.gitkeep

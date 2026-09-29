@@ -6,14 +6,14 @@
 #include <cstring>
 #include <stdexcept>
 
-#pragma pack(push, 1)   //Remove padding for better memory efficiency
+#pragma pack(push, 1)   // Remove padding for better memory efficiency
 struct PageHeader {
     page_id_t pageId;       // 4 bytes — this page's own ID
     page_id_t parentPageId; // 4 bytes — parent's page ID (INVALID_PAGE for root)
     PageType  pageType;     // 1 byte  — LEAF / INTERNAL / FREE / HEADER
     uint16_t  numKeys;      // 2 bytes — how many keys are currently stored
     uint8_t   _pad;         // 1 byte  — align body to 4-byte boundary
-    //12 bytes
+    // 12 bytes
 };
 #pragma pack(pop)
 
@@ -27,7 +27,8 @@ public:
     static constexpr int PREV_OFFSET     = sizeof(PageHeader);          // 12
     static constexpr int NEXT_OFFSET     = PREV_OFFSET + 4;             // 16
     static constexpr int KEYS_OFFSET     = NEXT_OFFSET + 4;             // 20
-    static constexpr int MAX_KEYS        = (PAGE_SIZE - KEYS_OFFSET) / sizeof(K);
+    static constexpr int KEY_SIZE        = KeyTraits<K>::diskSize;
+    static constexpr int MAX_KEYS        = (PAGE_SIZE - KEYS_OFFSET) / KEY_SIZE;
 
     // Construct a view over an existing raw buffer (read from disk)
     explicit LeafPage(char* rawPage) : raw_(rawPage) {}
@@ -52,12 +53,10 @@ public:
         return *reinterpret_cast<const PageHeader*>(raw_ + HEADER_OFFSET); 
     }
 
-    page_id_t  pageId()   const {
-        return header().pageId;
-    }
+    page_id_t  pageId()   const { return header().pageId;       }
     page_id_t  parent()   const { return header().parentPageId; }
-    uint16_t   numKeys()  const { return header().numKeys;  }
-    int        capacity() const { return MAX_KEYS;          }
+    uint16_t   numKeys()  const { return header().numKeys;      }
+    int        capacity() const { return MAX_KEYS;              }
     bool       isFull()   const { return numKeys() >= MAX_KEYS; }
 
     void setParent(page_id_t p)  { header().parentPageId = p; }
@@ -74,28 +73,23 @@ public:
     void setNext(page_id_t id) { memcpy(raw_ + NEXT_OFFSET, &id, 4); }
 
     // ── Key access ───────────────────────────────────────────────────────────
-    // Keys are stored as a packed array starting at KEYS_OFFSET.
-    // Use getKey/setKey — never pointer-arithmetic outside this class.
     K getKey(int idx) const {
         if (idx < 0 || idx >= numKeys())
             throw std::out_of_range("LeafPage::getKey out of range");
-        K val;
-        memcpy(&val, raw_ + KEYS_OFFSET + idx * sizeof(K), sizeof(K));
-        return val;
+        return KeyTraits<K>::read(raw_ + KEYS_OFFSET + idx * KEY_SIZE);
     }
     void setKey(int idx, const K& val) {
         if (idx < 0 || idx >= capacity())
             throw std::out_of_range("LeafPage::setKey out of range");
-        memcpy(raw_ + KEYS_OFFSET + idx * sizeof(K), &val, sizeof(K));
+        KeyTraits<K>::write(raw_ + KEYS_OFFSET + idx * KEY_SIZE, val);
     }
 
     // Insert key at position idx, shifting right — caller must check !isFull()
     void insertKey(int idx, const K& val) {
         int n = numKeys();
-        // Shift keys right to make room
-        memmove(raw_ + KEYS_OFFSET + (idx + 1) * sizeof(K),
-                raw_ + KEYS_OFFSET + idx       * sizeof(K),
-                (n - idx) * sizeof(K));
+        memmove(raw_ + KEYS_OFFSET + (idx + 1) * KEY_SIZE,
+                raw_ + KEYS_OFFSET + idx       * KEY_SIZE,
+                (n - idx) * KEY_SIZE);
         setKey(idx, val);
         setNumKeys(n + 1);
     }
@@ -103,44 +97,31 @@ public:
     // Remove key at position idx, shifting left
     void removeKey(int idx) {
         int n = numKeys();
-        memmove(raw_ + KEYS_OFFSET + idx       * sizeof(K),
-                raw_ + KEYS_OFFSET + (idx + 1) * sizeof(K),
-                (n - idx - 1) * sizeof(K));
+        memmove(raw_ + KEYS_OFFSET + idx       * KEY_SIZE,
+                raw_ + KEYS_OFFSET + (idx + 1) * KEY_SIZE,
+                (n - idx - 1) * KEY_SIZE);
         setNumKeys(n - 1);
     }
 
-    // Raw page pointer — buffer pool needs this to pin/unpin
     char* raw() { return raw_; }
 
 private:
-    char* raw_;  // points into a buffer pool frame — never owns this memory
+    char* raw_;
 };
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// InternalPage<K>
-//
-// Disk layout (PAGE_SIZE bytes total):
-//   [PageHeader   : 12 bytes]
-//   [keys[]       : numKeys * sizeof(K)]
-//   [children[]   : (numKeys + 1) * sizeof(page_id_t)]
-//   [unused       : rest of page]
-//
-// Keys and children are packed from KEYS_OFFSET upward.
-// Children start right after the key array — their offset depends on numKeys,
-// but we always allocate MAX_KEYS slots for keys and MAX_KEYS+1 for children
-// so the children region starts at a fixed offset too.
+// InternalPage<K> (also aliased as IntervalPage<K>)
 // ─────────────────────────────────────────────────────────────────────────────
 template<typename K>
 class InternalPage {
 public:
     static constexpr int HEADER_OFFSET    = 0;
     static constexpr int KEYS_OFFSET      = sizeof(PageHeader);   // 12
-    // Reserve space for MAX_KEYS keys, then children follow
-    // Solve: MAX_KEYS * sizeof(K) + (MAX_KEYS + 1) * 4 <= PAGE_SIZE - 12
+    static constexpr int KEY_SIZE         = KeyTraits<K>::diskSize;
     static constexpr int MAX_KEYS         = (PAGE_SIZE - KEYS_OFFSET - 4)
-                                            / (sizeof(K) + sizeof(page_id_t));
-    static constexpr int CHILDREN_OFFSET  = KEYS_OFFSET + MAX_KEYS * sizeof(K);
+                                            / (KEY_SIZE + sizeof(page_id_t));
+    static constexpr int CHILDREN_OFFSET  = KEYS_OFFSET + MAX_KEYS * KEY_SIZE;
 
     explicit InternalPage(char* rawPage) : raw_(rawPage) {}
 
@@ -153,7 +134,6 @@ public:
         header()._pad         = 0;
     }
 
-    // ── Header accessors ─────────────────────────────────────────────────────
     PageHeader& header()       { return *reinterpret_cast<PageHeader*>(raw_); }
     const PageHeader& header() const { return *reinterpret_cast<const PageHeader*>(raw_); }
 
@@ -166,38 +146,32 @@ public:
     void setParent(page_id_t p)  { header().parentPageId = p; }
     void setNumKeys(uint16_t n)  { header().numKeys = n;      }
 
-    // ── Key access ───────────────────────────────────────────────────────────
     K getKey(int idx) const {
         if (idx < 0 || idx >= numKeys())
             throw std::out_of_range("InternalPage::getKey out of range");
-        K val;
-        memcpy(&val, raw_ + KEYS_OFFSET + idx * sizeof(K), sizeof(K));
-        return val;
+        return KeyTraits<K>::read(raw_ + KEYS_OFFSET + idx * KEY_SIZE);
     }
     void setKey(int idx, const K& val) {
         if (idx < 0 || idx >= capacity())
             throw std::out_of_range("InternalPage::setKey out of range");
-        memcpy(raw_ + KEYS_OFFSET + idx * sizeof(K), &val, sizeof(K));
+        KeyTraits<K>::write(raw_ + KEYS_OFFSET + idx * KEY_SIZE, val);
     }
 
-    // Insert key at idx, shifting right
     void insertKey(int idx, const K& val) {
         int n = numKeys();
-        memmove(raw_ + KEYS_OFFSET + (idx + 1) * sizeof(K),
-                raw_ + KEYS_OFFSET + idx       * sizeof(K),
-                (n - idx) * sizeof(K));
+        memmove(raw_ + KEYS_OFFSET + (idx + 1) * KEY_SIZE,
+                raw_ + KEYS_OFFSET + idx       * KEY_SIZE,
+                (n - idx) * KEY_SIZE);
         setKey(idx, val);
-        // numKeys updated by caller after inserting child too
     }
 
     void removeKey(int idx) {
         int n = numKeys();
-        memmove(raw_ + KEYS_OFFSET + idx       * sizeof(K),
-                raw_ + KEYS_OFFSET + (idx + 1) * sizeof(K),
-                (n - idx - 1) * sizeof(K));
+        memmove(raw_ + KEYS_OFFSET + idx       * KEY_SIZE,
+                raw_ + KEYS_OFFSET + (idx + 1) * KEY_SIZE,
+                (n - idx - 1) * KEY_SIZE);
     }
 
-    // ── Child access — n keys means n+1 children ─────────────────────────────
     page_id_t getChild(int idx) const {
         if (idx < 0 || idx > numKeys())
             throw std::out_of_range("InternalPage::getChild out of range");
@@ -211,9 +185,8 @@ public:
         memcpy(raw_ + CHILDREN_OFFSET + idx * sizeof(page_id_t), &id, sizeof(page_id_t));
     }
 
-    // Insert child at idx, shifting right
     void insertChild(int idx, page_id_t id) {
-        int n = numKeys(); // n+1 children exist before this insert
+        int n = numKeys();
         memmove(raw_ + CHILDREN_OFFSET + (idx + 1) * sizeof(page_id_t),
                 raw_ + CHILDREN_OFFSET + idx       * sizeof(page_id_t),
                 (n + 1 - idx) * sizeof(page_id_t));
@@ -227,8 +200,6 @@ public:
                 (n - idx) * sizeof(page_id_t));
     }
 
-    // Convenience: insert key+right-child together (the common split case)
-    // Inserts key at keyIdx and rightChild at keyIdx+1
     void insertKeyAndRightChild(int keyIdx, const K& key, page_id_t rightChild) {
         insertKey(keyIdx, key);
         insertChild(keyIdx + 1, rightChild);
@@ -253,10 +224,13 @@ private:
     char* raw_;
 };
 
+// User-specified alias for interval_page
+template<typename K>
+using IntervalPage = InternalPage<K>;
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HeaderPage — page 0 of the file, always.
-// Stores file-level metadata. Not a tree node.
 // ─────────────────────────────────────────────────────────────────────────────
 #pragma pack(push, 1)
 struct HeaderPageData {
