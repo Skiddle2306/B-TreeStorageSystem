@@ -35,3 +35,21 @@ target_include_directories(test1 PRIVATE
 target_include_directories(PageManagerTest PRIVATE
     include
     src/include)
+
+add_executable(mysql_cli
+    src/mysql_cli.cpp
+    src/b_plus_tree.cpp
+    src/page_manager.cpp
+)
+target_include_directories(mysql_cli PRIVATE
+    include
+    src/include)
+
+add_executable(test_sql
+    src/test_sql.cpp
+    src/b_plus_tree.cpp
+    src/page_manager.cpp
+)
+target_include_directories(test_sql PRIVATE
+    include
+    src/include)

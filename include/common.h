@@ -103,6 +103,47 @@ template<size_t N>
 using FixedChar = FixedString<N>;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// RowPayload<N>
+//
+// Generic fixed-size row payload storage for relational tables in SQL engine.
+// Fits in LeafPage<K, RowPayload<N>> with zero heap allocation.
+// ─────────────────────────────────────────────────────────────────────────────
+template<size_t N = 256>
+struct RowPayload {
+    char data[N];
+
+    RowPayload() {
+        std::memset(data, 0, N);
+    }
+
+    bool operator==(const RowPayload<N>& other) const {
+        return std::memcmp(data, other.data, N) == 0;
+    }
+    bool operator!=(const RowPayload<N>& other) const {
+        return !(*this == other);
+    }
+    bool operator<(const RowPayload<N>& other) const {
+        return std::memcmp(data, other.data, N) < 0;
+    }
+    bool operator<=(const RowPayload<N>& other) const {
+        return std::memcmp(data, other.data, N) <= 0;
+    }
+    bool operator>(const RowPayload<N>& other) const {
+        return std::memcmp(data, other.data, N) > 0;
+    }
+    bool operator>=(const RowPayload<N>& other) const {
+        return std::memcmp(data, other.data, N) >= 0;
+    }
+
+    friend std::ostream& operator<<(std::ostream& os, const RowPayload<N>&) {
+        os << "[RowPayload " << N << "B]";
+        return os;
+    }
+};
+
+using DefaultRowPayload = RowPayload<256>;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // KeyTraits<K>
 //
 // Decouples "how big is K on disk" from "what K looks like in C++".
@@ -112,7 +153,7 @@ using FixedChar = FixedString<N>;
 // ─────────────────────────────────────────────────────────────────────────────
 template<typename K>
 struct KeyTraits {
-    // Default: trivially copyable types (int, float, double, char, FixedString<N>, …)
+    // Default: trivially copyable types (int, float, double, char, structs, FixedString<N>, …)
     static constexpr int diskSize = sizeof(K);
 
     static void write(char* dst, const K& val) {
@@ -149,12 +190,13 @@ enum class KeyTypeId : uint32_t {
     DOUBLE       = 3,
     CHAR         = 4,
     FIXED_STRING = 5,
+    CUSTOM       = 6,
 };
 
 template<typename K>
 struct KeyTypeInfo {
-    static constexpr KeyTypeId typeId = KeyTypeId::UNKNOWN;
-    static constexpr const char* name = "unknown";
+    static constexpr KeyTypeId typeId = KeyTypeId::CUSTOM;
+    static constexpr const char* name = "custom";
 };
 
 template<>
@@ -193,16 +235,31 @@ struct KeyTypeInfo<FixedString<N>> {
     static constexpr const char* name = "fixed_string";
 };
 
+template<>
+struct KeyTypeInfo<int64_t> {
+    static constexpr KeyTypeId typeId = KeyTypeId::CUSTOM;
+    static constexpr const char* name = "bigint";
+};
+
+template<size_t N>
+struct KeyTypeInfo<RowPayload<N>> {
+    static constexpr KeyTypeId typeId = KeyTypeId::CUSTOM;
+    static constexpr const char* name = "row_payload";
+};
+
 constexpr uint32_t DB_META_MAGIC = 0xB7EEFACE;
 
 #pragma pack(push, 1)
 struct TreeMetadata {
-    uint32_t magic;         // DB_META_MAGIC (0xB7EEFACE)
-    uint32_t keyTypeId;     // KeyTypeId
-    uint32_t keyDiskSize;   // KeyTraits<K>::diskSize
-    uint32_t maxStringLen;  // length for string / char array
-    char     typeName[32];  // "int", "fixed_string", etc.
-    uint8_t  _reserved[464];// pad to 512 bytes
+    uint32_t magic;          // DB_META_MAGIC (0xB7EEFACE)
+    uint32_t keyTypeId;      // KeyTypeId for K
+    uint32_t keyDiskSize;    // KeyTraits<K>::diskSize
+    uint32_t maxStringLen;   // length for key if string
+    char     typeName[32];   // "int", "fixed_string", etc.
+    uint32_t valTypeId;      // KeyTypeId for V
+    uint32_t valDiskSize;    // KeyTraits<V>::diskSize
+    char     valTypeName[32];// "char", "custom", etc.
+    uint8_t  _reserved[424]; // pad to 512 bytes
 };
 #pragma pack(pop)
 

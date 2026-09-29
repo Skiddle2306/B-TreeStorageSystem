@@ -20,7 +20,21 @@ struct PageHeader {
 static_assert(sizeof(PageHeader) == 12, "PageHeader must be exactly 12 bytes");
 
 
-template<typename K>
+// ─────────────────────────────────────────────────────────────────────────────
+// LeafPage<K, V>
+//
+// Disk layout (PAGE_SIZE bytes total):
+//   [PageHeader   : 12 bytes]
+//   [prev         : 4 bytes]
+//   [next         : 4 bytes]
+//   [keys[]       : MAX_KEYS * KEY_SIZE]
+//   [values[]     : MAX_KEYS * VAL_SIZE]
+//   [unused       : rest of page]
+//
+// Storing keys and values in parallel contiguous arrays maximizes CPU cache line
+// efficiency during key searches while guaranteeing zero serialization overhead.
+// ─────────────────────────────────────────────────────────────────────────────
+template<typename K, typename V = char>
 class LeafPage {
 public:
     static constexpr int HEADER_OFFSET   = 0;
@@ -28,7 +42,10 @@ public:
     static constexpr int NEXT_OFFSET     = PREV_OFFSET + 4;             // 16
     static constexpr int KEYS_OFFSET     = NEXT_OFFSET + 4;             // 20
     static constexpr int KEY_SIZE        = KeyTraits<K>::diskSize;
-    static constexpr int MAX_KEYS        = (PAGE_SIZE - KEYS_OFFSET) / KEY_SIZE;
+    static constexpr int VAL_SIZE        = KeyTraits<V>::diskSize;
+    static constexpr int ENTRY_SIZE      = KEY_SIZE + VAL_SIZE;
+    static constexpr int MAX_KEYS        = (PAGE_SIZE - KEYS_OFFSET) / ENTRY_SIZE;
+    static constexpr int VALUES_OFFSET   = KEYS_OFFSET + MAX_KEYS * KEY_SIZE;
 
     // Construct a view over an existing raw buffer (read from disk)
     explicit LeafPage(char* rawPage) : raw_(rawPage) {}
@@ -84,22 +101,41 @@ public:
         KeyTraits<K>::write(raw_ + KEYS_OFFSET + idx * KEY_SIZE, val);
     }
 
-    // Insert key at position idx, shifting right — caller must check !isFull()
-    void insertKey(int idx, const K& val) {
+    // ── Value access ─────────────────────────────────────────────────────────
+    V getValue(int idx) const {
+        if (idx < 0 || idx >= numKeys())
+            throw std::out_of_range("LeafPage::getValue out of range");
+        return KeyTraits<V>::read(raw_ + VALUES_OFFSET + idx * VAL_SIZE);
+    }
+    void setValue(int idx, const V& val) {
+        if (idx < 0 || idx >= capacity())
+            throw std::out_of_range("LeafPage::setValue out of range");
+        KeyTraits<V>::write(raw_ + VALUES_OFFSET + idx * VAL_SIZE, val);
+    }
+
+    // Insert key and value at position idx, shifting right — caller must check !isFull()
+    void insertKey(int idx, const K& key, const V& val = V{}) {
         int n = numKeys();
         memmove(raw_ + KEYS_OFFSET + (idx + 1) * KEY_SIZE,
                 raw_ + KEYS_OFFSET + idx       * KEY_SIZE,
                 (n - idx) * KEY_SIZE);
-        setKey(idx, val);
+        memmove(raw_ + VALUES_OFFSET + (idx + 1) * VAL_SIZE,
+                raw_ + VALUES_OFFSET + idx       * VAL_SIZE,
+                (n - idx) * VAL_SIZE);
+        setKey(idx, key);
+        setValue(idx, val);
         setNumKeys(n + 1);
     }
 
-    // Remove key at position idx, shifting left
+    // Remove key and value at position idx, shifting left
     void removeKey(int idx) {
         int n = numKeys();
         memmove(raw_ + KEYS_OFFSET + idx       * KEY_SIZE,
                 raw_ + KEYS_OFFSET + (idx + 1) * KEY_SIZE,
                 (n - idx - 1) * KEY_SIZE);
+        memmove(raw_ + VALUES_OFFSET + idx       * VAL_SIZE,
+                raw_ + VALUES_OFFSET + (idx + 1) * VAL_SIZE,
+                (n - idx - 1) * VAL_SIZE);
         setNumKeys(n - 1);
     }
 
@@ -112,6 +148,9 @@ private:
 
 // ─────────────────────────────────────────────────────────────────────────────
 // InternalPage<K> (also aliased as IntervalPage<K>)
+//
+// Internal routing pages store ONLY keys and child page pointers.
+// They never store values, keeping internal nodes compact and maximizing fan-out.
 // ─────────────────────────────────────────────────────────────────────────────
 template<typename K>
 class InternalPage {
@@ -119,6 +158,7 @@ public:
     static constexpr int HEADER_OFFSET    = 0;
     static constexpr int KEYS_OFFSET      = sizeof(PageHeader);   // 12
     static constexpr int KEY_SIZE         = KeyTraits<K>::diskSize;
+    // Reserve space for MAX_KEYS keys, then children follow
     static constexpr int MAX_KEYS         = (PAGE_SIZE - KEYS_OFFSET - 4)
                                             / (KEY_SIZE + sizeof(page_id_t));
     static constexpr int CHILDREN_OFFSET  = KEYS_OFFSET + MAX_KEYS * KEY_SIZE;
@@ -186,7 +226,7 @@ public:
     }
 
     void insertChild(int idx, page_id_t id) {
-        int n = numKeys();
+        int n = numKeys(); // n+1 children exist before this insert
         memmove(raw_ + CHILDREN_OFFSET + (idx + 1) * sizeof(page_id_t),
                 raw_ + CHILDREN_OFFSET + idx       * sizeof(page_id_t),
                 (n + 1 - idx) * sizeof(page_id_t));

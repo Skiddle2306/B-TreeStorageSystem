@@ -9,7 +9,14 @@
 #include <memory>
 #include <iostream>
 
-template<typename K>
+// ─────────────────────────────────────────────────────────────────────────────
+// BPlusTree<K, V>
+//
+// Persistent, on-disk Key-Value B+ Tree.
+// - K: Primary key type (sorted, unique). Used in internal routing nodes & leaf nodes.
+// - V: Value / payload type (defaults to char for key-only sets). Stored ONLY in leaf nodes.
+// ─────────────────────────────────────────────────────────────────────────────
+template<typename K, typename V = char>
 class BPlusTree {
 public:
     explicit BPlusTree(const std::string& treeName = "default", int numFrames = 64);
@@ -21,10 +28,28 @@ public:
     BPlusTree(BPlusTree&&) noexcept = default;
     BPlusTree& operator=(BPlusTree&&) noexcept = default;
 
-    void insert(const K& x);
-    bool search(const K& val);
+    // Insert key with optional value (defaults to V{} for key-only trees)
+    void insert(const K& key, const V& value = V{});
+
+    // Point search: retrieves value associated with key, returns true if found
+    bool search(const K& key, V& outValue);
+
+    // Overload: checks if key exists (and prints Found/Not found)
+    bool search(const K& key);
+
+    // Range search: prints all keys in [lower, upper]
     void search(const K& lower, const K& upper);
-    void deleteNode(const K& x);
+
+    // Range scan: returns all (key, value) pairs in [lower, upper]
+    std::vector<std::pair<K, V>> scan(const K& lower, const K& upper);
+
+    // Full table scan: returns all (key, value) pairs in the entire tree
+    std::vector<std::pair<K, V>> scanAll();
+
+    // Delete key (and its value) from tree, returns true if deleted, false if not found
+    bool deleteNode(const K& key, bool verbose = true);
+
+    // Visualise the tree level by level
     void printTree();
 
     page_id_t rootPageId() const;
@@ -39,18 +64,7 @@ private:
     page_id_t findLeaf(const K& key, std::vector<page_id_t>& ancestors);
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Explicit template declarations
-// ─────────────────────────────────────────────────────────────────────────────
-extern template class BPlusTree<int>;
-extern template class BPlusTree<float>;
-extern template class BPlusTree<double>;
-extern template class BPlusTree<char>;
-extern template class BPlusTree<std::string>;
-extern template class BPlusTree<FixedString<256>>;
-extern template class BPlusTree<FixedString<128>>;
-extern template class BPlusTree<FixedString<64>>;
-extern template class BPlusTree<FixedString<32>>;
-extern template class BPlusTree<FixedString<16>>;
+// Include complete template implementation
+#include "b_plus_tree_impl.h"
 
 #endif // B_PLUS_TREE_H

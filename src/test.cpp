@@ -203,12 +203,81 @@ void testMultiLevelSplits() {
     std::cout << ">>> TEST 4 PASSED! <<<\n";
 }
 
+struct StudentPayload {
+    FixedString<32> name;
+    float gpa;
+    int age;
+
+    bool operator==(const StudentPayload& o) const {
+        return name == o.name && std::abs(gpa - o.gpa) < 0.001f && age == o.age;
+    }
+};
+
+void testKeyValueCustomStruct() {
+    std::cout << "\n=========================================\n";
+    std::cout << "TEST 5: Key-Value B+ Tree with Custom Struct\n";
+    std::cout << "=========================================\n";
+
+    const std::string treeName = "test_kv_students";
+    std::filesystem::remove_all("data/" + treeName);
+
+    std::cout << "[Step 1] Creating a Key-Value B+ tree (Key: int ID, Value: StudentPayload)...\n";
+    {
+        BPlusTree<int, StudentPayload> tree(treeName);
+
+        tree.insert(101, {"Alice Smith", 3.95f, 20});
+        tree.insert(105, {"Bob Jones",   3.40f, 22});
+        tree.insert(102, {"Charlie Brown", 3.80f, 21});
+        tree.insert(108, {"Diana Prince", 4.00f, 19});
+
+        std::cout << "Tree after inserting students:\n";
+        tree.printTree();
+
+        // Search and verify payload retrieval
+        StudentPayload student{};
+        bool found = tree.search(102, student);
+        assert(found == true);
+        assert(student.name == "Charlie Brown");
+        assert(student.age == 21);
+        std::cout << "Successfully retrieved student 102: " << student.name << ", GPA: " << student.gpa << ", Age: " << student.age << "\n";
+
+        found = tree.search(999, student);
+        assert(found == false);
+
+        std::cout << "Deleting student 105...\n";
+        tree.deleteNode(105);
+        assert(tree.search(105, student) == false);
+        assert(tree.search(101, student) == true);
+    }
+
+    std::cout << "\n[Step 2] Reloading Key-Value tree from disk...\n";
+    {
+        BPlusTree<int, StudentPayload> reloadedTree(treeName);
+
+        StudentPayload s101{}, s102{}, s108{}, s105{};
+        assert(reloadedTree.search(101, s101) == true);
+        assert(s101.name == "Alice Smith");
+        assert(s101.age == 20);
+
+        assert(reloadedTree.search(108, s108) == true);
+        assert(s108.name == "Diana Prince");
+        assert(s108.age == 19);
+
+        assert(reloadedTree.search(105, s105) == false);
+
+        std::cout << "Reloaded student 108: " << s108.name << " (GPA: " << s108.gpa << ")\n";
+    }
+
+    std::cout << ">>> TEST 5 PASSED! <<<\n";
+}
+
 int main() {
     std::cout << "Running Persistent B+ Tree Storage System Tests...\n";
     testIntTreePersistence();
     testStringTree();
     testTypeMismatchSafety();
     testMultiLevelSplits();
+    testKeyValueCustomStruct();
     std::cout << "\nALL TESTS PASSED SUCCESSFULLY! YAY\n";
     return 0;
 }
